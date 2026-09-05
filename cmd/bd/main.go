@@ -1180,7 +1180,12 @@ var rootCmd = &cobra.Command{
 					fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 				}
 			}
-			if cmdName == "doctor" && usesProxiedServer() {
+			// Keyed on the command path, like the validator it calls and the
+			// two other front-door branches: this one returns
+			// unconditionally, so a future `bd <parent> doctor` matching on
+			// the leaf name would get nil back from the path-keyed validator
+			// and return early past the guards below.
+			if proxyCommandPath(cmd) == "doctor" && usesProxiedServer() {
 				return validateProxyMaintenanceBeforeProvider(cmd)
 			}
 			if beadsDir == "" {
