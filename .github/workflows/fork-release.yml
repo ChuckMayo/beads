@@ -86,6 +86,11 @@ jobs:
   macos:
     name: Validate and package macOS
     runs-on: macos-latest
+    env:
+      # The hosted runner tracks the newest SDK. Without an explicit target,
+      # clang stamps that runner's OS as LC_BUILD_VERSION.minOS and the binary
+      # will not launch on older macOS versions supported by Vibery Desktop.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
@@ -118,6 +123,12 @@ jobs:
               -ldflags "-s -w -X main.Version=${version} -X main.Build=${short_commit} -X main.Commit=${commit} -X main.Branch=${GITHUB_REF_NAME}" \
               -o "$staging/bd" ./cmd/bd
             ./scripts/verify-cgo.sh "$staging/bd"
+            minos="$(vtool -show-build "$staging/bd" | awk '$1 == "minos" { print $2; exit }')"
+            if [ "$minos" != "$MACOSX_DEPLOYMENT_TARGET" ]; then
+              echo "ERROR: $staging/bd has unexpected minimum macOS version $minos; expected $MACOSX_DEPLOYMENT_TARGET" >&2
+              vtool -show-build "$staging/bd" >&2
+              exit 1
+            fi
             codesign -s - -f "$staging/bd"
             cp LICENSE README.md CHANGELOG.md "$staging/"
             tar -czf "${staging}.tar.gz" -C "$staging" .
