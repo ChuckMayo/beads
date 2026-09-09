@@ -52,6 +52,7 @@ jobs:
       - name: Build and package Linux binaries
         run: |
           version="${GITHUB_REF_NAME#v}"
+          version="${version//\//-}"
           commit="$(git rev-parse HEAD)"
           short_commit="$(git rev-parse --short HEAD)"
           for arch in amd64 arm64; do
@@ -80,6 +81,7 @@ jobs:
             beads_*_linux_*.tar.gz
             checksums.txt
           if-no-files-found: error
+          overwrite: true
 
   macos:
     name: Validate and package macOS
@@ -98,6 +100,7 @@ jobs:
       - name: Build and package macOS binaries
         run: |
           version="${GITHUB_REF_NAME#v}"
+          version="${version//\//-}"
           commit="$(git rev-parse HEAD)"
           short_commit="$(git rev-parse --short HEAD)"
           for arch in arm64 amd64; do
@@ -129,6 +132,7 @@ jobs:
             beads_*_darwin_*.tar.gz
             darwin-checksums.txt
           if-no-files-found: error
+          overwrite: true
 
   publish:
     name: Publish complete fork release

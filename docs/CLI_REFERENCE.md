@@ -3601,7 +3601,7 @@ bd prime [flags]
       --hook-json       Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)
       --mcp             Force MCP mode (minimal output)
       --memories-only   Output only persistent memories for compact hook contexts
-      --stealth         Stealth mode (no git operations, flush only)
+      --stealth         Legacy compatibility flag; prime stays source-control neutral
 ```
 
 ### bd quickstart
