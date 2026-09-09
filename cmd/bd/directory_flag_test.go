@@ -61,8 +61,89 @@ func TestResolveChangeDirBeadsDirRejectsFile(t *testing.T) {
 }
 
 func TestResolveChangeDirBeadsDirRejectsDirectoryWithoutProject(t *testing.T) {
-	if _, err := resolveChangeDirBeadsDir(t.TempDir()); err == nil {
+	// Keep this fixture outside any developer-owned ancestor workspace. A
+	// task-local TMPDIR may itself live below a valid ~/.beads directory.
+	dir, err := os.MkdirTemp("/tmp", "beads-no-project-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if _, err := resolveChangeDirBeadsDir(dir); err == nil {
 		t.Fatal("expected -C target without a beads project to fail")
+	}
+}
+
+func TestApplyChangeDirSelectionRestoresProcessContext(t *testing.T) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalChangeDir := changeDir
+	t.Cleanup(func() {
+		restoreChangeDirSelection()
+		changeDir = originalChangeDir
+		_ = os.Chdir(originalDir)
+	})
+
+	target := t.TempDir()
+	beadsDir := filepath.Join(target, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"backend":"dolt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_DIR", "/original/beads")
+	changeDir = target
+	if err := applyChangeDirSelection(); err != nil {
+		t.Fatalf("applyChangeDirSelection: %v", err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.Getwd(); got != wantTarget {
+		t.Fatalf("cwd after apply = %q, want %q", got, wantTarget)
+	}
+	wantBeadsDir, err := filepath.EvalSymlinks(beadsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := os.Getenv("BEADS_DIR"); got != wantBeadsDir {
+		t.Fatalf("BEADS_DIR after apply = %q, want %q", got, wantBeadsDir)
+	}
+
+	restoreChangeDirSelection()
+	if got, _ := os.Getwd(); got != originalDir {
+		t.Fatalf("cwd after restore = %q, want %q", got, originalDir)
+	}
+	if got := os.Getenv("BEADS_DIR"); got != "/original/beads" {
+		t.Fatalf("BEADS_DIR after restore = %q, want original value", got)
+	}
+}
+
+func TestApplyChangeDirSelectionFailureLeavesProcessContextUntouched(t *testing.T) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalChangeDir := changeDir
+	t.Cleanup(func() {
+		restoreChangeDirSelection()
+		changeDir = originalChangeDir
+		_ = os.Chdir(originalDir)
+	})
+
+	t.Setenv("BEADS_DIR", "/original/beads")
+	changeDir = filepath.Join(t.TempDir(), "missing")
+	if err := applyChangeDirSelection(); err == nil {
+		t.Fatal("invalid -C unexpectedly succeeded")
+	}
+	if got, _ := os.Getwd(); got != originalDir {
+		t.Fatalf("failed apply changed cwd to %q, want %q", got, originalDir)
+	}
+	if got := os.Getenv("BEADS_DIR"); got != "/original/beads" {
+		t.Fatalf("failed apply changed BEADS_DIR to %q", got)
 	}
 }
 

@@ -314,25 +314,29 @@ func TestOutputContextFunction(t *testing.T) {
 			}
 
 			output := buf.String()
-
-			for _, expected := range tt.expectText {
-				if !strings.Contains(output, expected) {
-					t.Errorf("Expected text not found: %s", expected)
-				}
+			wantHeader := "Beads Workflow Context"
+			if tt.mcpMode {
+				wantHeader = "Beads Issue Tracker Active"
 			}
+			if !strings.Contains(output, wantHeader) {
+				t.Fatalf("expected %q header; output:\n%s", wantHeader, output)
+			}
+			assertNoGeneratedGitAuthority(t, output)
 
-			for _, rejected := range tt.rejectText {
-				if strings.Contains(output, rejected) {
-					t.Errorf("Unexpected text found: %s", rejected)
-				}
+			// Only Beads' own Dolt sync hint is conditional. Repository facts,
+			// branch shape, and agent.profile never alter source-control guidance.
+			wantDoltPush := !tt.mcpMode && !tt.stealthMode && !tt.noPushMode && !tt.localOnlyMode && !tt.noSyncRemoteMode
+			if got := strings.Contains(output, "bd dolt push"); got != wantDoltPush {
+				t.Fatalf("bd dolt push present = %v, want %v; output:\n%s", got, wantDoltPush, output)
 			}
 		})
 	}
 }
 
-func TestPrimeLocalOnlyDoesNotClaimNoGitAuthority(t *testing.T) {
+func TestPrimeRepositoryFactsDoNotChangeSourceControlGuidance(t *testing.T) {
 	defer stubPrimeStoreUnavailable()()
-	defer stubPrimeAgentProfile(config.ProfileConservative)()
+	defer stubPrimeHasSyncRemote(false)()
+	defer stubPrimeNoPushConfigured(false)()
 
 	for _, tc := range []struct {
 		name    string
@@ -342,37 +346,28 @@ func TestPrimeLocalOnlyDoesNotClaimNoGitAuthority(t *testing.T) {
 		{name: "MCP", mcpMode: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			defer stubIsEphemeralBranch(false)()
-			defer stubPrimeHasGitRemote(false)()
-			defer stubPrimeNoPushConfigured(false)()
-
-			var buf bytes.Buffer
-			if err := outputPrimeContext(&buf, tc.mcpMode, false); err != nil {
-				t.Fatalf("outputPrimeContext failed: %v", err)
+			render := func(remote, ephemeral bool, profile config.AgentProfile) string {
+				t.Helper()
+				defer stubIsEphemeralBranch(ephemeral)()
+				defer stubPrimeHasGitRemote(remote)()
+				defer stubPrimeAgentProfile(profile)()
+				var buf bytes.Buffer
+				if err := outputPrimeContext(&buf, tc.mcpMode, false); err != nil {
+					t.Fatalf("outputPrimeContext failed: %v", err)
+				}
+				return buf.String()
 			}
 
-			output := buf.String()
-			for _, expected := range []string{
-				"Git authority: local-only/no-remote",
-				"No git remote configured",
-				"Do not push, pull, or run remote sync",
-				"Local git operations follow active user, orchestrator, and repository authority",
-				"git status",
+			baseline := render(true, false, config.ProfileConservative)
+			for _, got := range []string{
+				render(false, false, config.ProfileConservative),
+				render(true, true, config.ProfileMinimal),
+				render(false, true, config.ProfileTeamMaintainer),
 			} {
-				if !strings.Contains(output, expected) {
-					t.Fatalf("expected local-only output to contain %q; output:\n%s", expected, output)
+				if got != baseline {
+					t.Fatalf("repository facts or profile changed generated guidance\nbaseline:\n%s\ngot:\n%s", baseline, got)
 				}
-			}
-			for _, rejected := range []string{
-				"Git authority: no git operations in this context",
-				"git push",
-				"git pull",
-				"bd dolt push",
-				"bd dolt pull",
-			} {
-				if strings.Contains(output, rejected) {
-					t.Fatalf("local-only output should not contain %q; output:\n%s", rejected, output)
-				}
+				assertNoGeneratedGitAuthority(t, got)
 			}
 		})
 	}

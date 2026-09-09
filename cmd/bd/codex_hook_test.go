@@ -15,7 +15,7 @@ import (
 func stubCodexHookPrime(t *testing.T, fn func(memoriesOnly bool) (string, error)) {
 	t.Helper()
 	orig := codexHookExecPrime
-	codexHookExecPrime = func(_ context.Context, memoriesOnly bool) (string, error) {
+	codexHookExecPrime = func(_ context.Context, _ string, memoriesOnly bool) (string, error) {
 		return fn(memoriesOnly)
 	}
 	t.Cleanup(func() { codexHookExecPrime = orig })
@@ -78,7 +78,12 @@ func TestCodexHookPrimeSubprocessUsesPayloadCWD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
 	}
-	if actual := strings.TrimSpace(got.HookSpecificOutput.AdditionalContext); actual != want {
+	actual := strings.TrimSpace(got.HookSpecificOutput.AdditionalContext)
+	actual, err = filepath.EvalSymlinks(actual)
+	if err != nil {
+		t.Fatalf("EvalSymlinks actual cwd: %v", err)
+	}
+	if actual != want {
 		t.Fatalf("prime subprocess cwd = %q, want payload cwd %q", actual, want)
 	}
 }
@@ -122,8 +127,17 @@ func TestCodexHookPostCompactRefreshUsesCurrentPayloadCWDOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvalSymlinks: %v", err)
 	}
-	if !strings.Contains(out.String(), want) {
-		t.Fatalf("refresh did not use current payload cwd %q: %s", want, out.String())
+	var got codexHookResponse
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("parse refresh output: %v\n%s", err, out.String())
+	}
+	actual := strings.TrimSpace(got.HookSpecificOutput.AdditionalContext)
+	actual, err = filepath.EvalSymlinks(actual)
+	if err != nil {
+		t.Fatalf("EvalSymlinks actual refresh cwd: %v", err)
+	}
+	if actual != want {
+		t.Fatalf("refresh cwd = %q, want current payload cwd %q", actual, want)
 	}
 
 	out.Reset()

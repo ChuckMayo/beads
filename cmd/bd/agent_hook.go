@@ -20,10 +20,19 @@ import (
 // The hooks exec a subprocess (rather than calling prime in process) to avoid
 // re-entrant store initialization.
 func runBdPrime(ctx context.Context, args ...string) (string, error) {
+	return runBdPrimeInDir(ctx, "", args...)
+}
+
+// runBdPrimeInDir runs prime from the workspace directory supplied by the hook
+// host. An empty directory preserves the caller's current directory.
+func runBdPrimeInDir(ctx context.Context, dir string, args ...string) (string, error) {
 	cmdArgs := append([]string{"prime"}, args...)
 	// #nosec G702 - os.Args[0] is this bd binary re-invoking itself; cmdArgs is the
 	// fixed "prime" subcommand plus internal flags, never attacker-controlled input.
 	cmd := exec.CommandContext(ctx, os.Args[0], cmdArgs...)
+	if strings.TrimSpace(dir) != "" {
+		cmd.Dir = dir
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("bd %s: %w: %s", strings.Join(cmdArgs, " "), err, strings.TrimSpace(string(out)))

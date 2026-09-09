@@ -56,17 +56,9 @@ Hook-enabled agents use the `minimal` profile because `bd prime` injects full co
 
 **Profile precedence:** if a file already has a `full` profile section and a `minimal` profile tool installs to the same file (for example via symlinks), the `full` profile is preserved to avoid information loss.
 
-### Policy Profiles
+### Legacy Agent Profiles
 
-Template profiles control how much text gets installed. Policy profiles control what an agent is authorized to do at handoff:
-
-| Policy | Default scope | Commit/push guidance |
-|--------|---------------|----------------------|
-| `conservative` | Standalone projects, unknown projects, and one-off assistance | Use `bd` for task tracking, then report changed files, validation, and proposed commands. Do not commit, push, or run Dolt remote sync without explicit user or orchestrator approval. |
-| `minimal` | Hook-first integrations where `bd prime` carries the detailed workflow | Same git authority as conservative; the installed file stays short and points to `bd prime`. |
-| `team-maintainer` | Repositories that explicitly delegate session close to agents | Agents may close beads, run quality gates, commit, run `bd dolt push`, and `git push` as part of routine work. Current "do not commit" or "do not push" instructions still override the profile. |
-
-The generated beads section and `bd prime` default to conservative git authority. Set the profile explicitly with the `agent.profile` config key or the `BD_AGENT_PROFILE` environment variable (values: `conservative`, `minimal`, `team-maintainer`; the env var takes precedence; an unrecognized value falls back to `conservative`):
+Template profiles still control how much Beads text gets installed. The older `agent.profile` setting remains readable for configuration compatibility, but generated Beads context no longer uses it to grant or revoke source-control permissions:
 
 ```bash
 bd config set agent.profile team-maintainer
@@ -74,7 +66,7 @@ bd config set agent.profile team-maintainer
 BD_AGENT_PROFILE=team-maintainer bd prime
 ```
 
-`bd prime` layers this explicit knob on top of its per-branch git-authority checks (stealth mode, no git remote, ephemeral branch, `no-push`); those hard constraints still take precedence, and `team-maintainer` remains subordinate to any explicit "do not commit"/"do not push" instruction. Beads never infers team-maintainer authority merely because a remote exists — it must be set via this knob (or, for tools without config access, via top-level project instructions).
+Source-control decisions belong to the current user, orchestrator, and repository instructions. Repository detection, branch shape, `no-git-ops`, `no-push`, and `agent.profile` can affect Beads' own integration or Dolt-sync behavior, but they never create session-wide source-control rules.
 
 ### Managed Sections
 

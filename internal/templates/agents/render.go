@@ -49,8 +49,8 @@ type RenderOpts struct {
 	// HasRemote indicates whether a Dolt remote is configured.
 	// When false, "bd dolt push" is omitted from session-completion instructions.
 	HasRemote bool
-	// NoPush indicates the rig is declared local-only (no-push: true in config).
-	// When true, "bd dolt push" is omitted regardless of HasRemote.
+	// NoPush indicates Beads Dolt pushes are disabled (no-push: true in config).
+	// It affects only Beads sync hints, never source-control permissions.
 	NoPush bool
 }
 

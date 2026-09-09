@@ -42,12 +42,20 @@ func TestDirectoryFlagChangesCommandWorkingDirectory(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name   string
-		target string
+		name         string
+		target       string
+		wantRepoRoot string
+		wantBeadsDir string
 	}{
-		{name: "absolute", target: targetDir},
-		{name: "relative", target: filepath.Join("..", "target")},
+		{name: "absolute", target: targetDir, wantRepoRoot: targetDir, wantBeadsDir: beadsDir},
+		{name: "relative", target: filepath.Join("..", "target"), wantRepoRoot: targetDir, wantBeadsDir: beadsDir},
+		{name: "nested", target: filepath.Join(targetDir, "nested"), wantRepoRoot: targetDir, wantBeadsDir: beadsDir},
 	} {
+		if tc.name == "nested" {
+			if err := os.MkdirAll(tc.target, 0o755); err != nil {
+				t.Fatalf("mkdir nested target: %v", err)
+			}
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(bd, "--sandbox", "-C", tc.target, "context", "--json")
 			cmd.Dir = callerDir
@@ -64,14 +72,114 @@ func TestDirectoryFlagChangesCommandWorkingDirectory(t *testing.T) {
 			if start < 0 || json.Unmarshal(stdout.Bytes()[start:], &got) != nil {
 				t.Fatalf("parse context JSON:\n%s", stdout.String())
 			}
-			want, err := filepath.EvalSymlinks(targetDir)
+			want, err := filepath.EvalSymlinks(tc.wantRepoRoot)
 			if err != nil {
 				t.Fatalf("EvalSymlinks target: %v", err)
 			}
 			if got.CWDRepoRoot != want {
 				t.Fatalf("cwd_repo_root = %q, want -C target repo %q; full context: %+v", got.CWDRepoRoot, want, got)
 			}
+			wantBeads, err := filepath.EvalSymlinks(tc.wantBeadsDir)
+			if err != nil {
+				t.Fatalf("EvalSymlinks beads dir: %v", err)
+			}
+			if got.BeadsDir != wantBeads {
+				t.Fatalf("beads_dir = %q, want selected storage %q; full context: %+v", got.BeadsDir, wantBeads, got)
+			}
 		})
+	}
+
+	// A failed lookup must not poison a subsequent valid selection.
+	bad := exec.Command(bd, "--sandbox", "-C", filepath.Join(root, "missing"), "context", "--json")
+	bad.Dir = callerDir
+	bad.Env = directoryFlagTestEnv(t)
+	if err := bad.Run(); err == nil {
+		t.Fatal("invalid -C unexpectedly succeeded")
+	}
+	good := exec.Command(bd, "--sandbox", "-C", targetDir, "context", "--json")
+	good.Dir = callerDir
+	good.Env = directoryFlagTestEnv(t)
+	if out, err := good.CombinedOutput(); err != nil {
+		t.Fatalf("valid -C after failed lookup: %v\n%s", err, out)
+	}
+}
+
+func TestDirectoryFlagPreservesExternalStorageAndWorktreeContext(t *testing.T) {
+	bd := buildBDForInitTests(t)
+	root := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+		}
+	}
+	contextAt := func(caller, target string) ContextInfo {
+		t.Helper()
+		cmd := exec.Command(bd, "--sandbox", "-C", target, "context", "--json")
+		cmd.Dir = caller
+		cmd.Env = directoryFlagTestEnv(t)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bd -C %s context --json: %v\n%s", target, err, out)
+		}
+		start := bytes.IndexByte(out, '{')
+		var got ContextInfo
+		if start < 0 || json.Unmarshal(out[start:], &got) != nil {
+			t.Fatalf("parse context JSON:\n%s", out)
+		}
+		return got
+	}
+
+	mainRepo := filepath.Join(root, "main")
+	if err := os.MkdirAll(mainRepo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(mainRepo, "init", "-q")
+	runGit(mainRepo, "config", "user.name", "fixture")
+	runGit(mainRepo, "config", "user.email", "fixture@example.com")
+	if err := os.WriteFile(filepath.Join(mainRepo, "README.md"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(mainRepo, "add", "README.md")
+	runGit(mainRepo, "commit", "-qm", "fixture")
+
+	worktree := filepath.Join(root, "worktree")
+	runGit(mainRepo, "worktree", "add", "-q", "-b", "fixture-worktree", worktree, "HEAD")
+	worktreeBeads := filepath.Join(worktree, ".beads")
+	if err := os.MkdirAll(worktreeBeads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeBeads, "metadata.json"), []byte(`{"backend":"dolt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := contextAt(root, worktree)
+	wantWorktree, _ := filepath.EvalSymlinks(worktree)
+	if got.CWDRepoRoot != wantWorktree || !got.IsWorktree {
+		t.Fatalf("worktree context = %+v, want cwd repo %q and is_worktree=true", got, wantWorktree)
+	}
+
+	externalRepo := filepath.Join(root, "external-repo")
+	externalBeads := filepath.Join(root, "shared-storage", ".beads")
+	if err := os.MkdirAll(filepath.Join(externalRepo, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(externalBeads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(externalRepo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(externalBeads, "metadata.json"), []byte(`{"backend":"dolt"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(externalRepo, ".beads", "redirect"), []byte(externalBeads+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = contextAt(root, externalRepo)
+	wantRepo, _ := filepath.EvalSymlinks(externalRepo)
+	wantBeads, _ := filepath.EvalSymlinks(externalBeads)
+	if got.CWDRepoRoot != wantRepo || got.BeadsDir != wantBeads {
+		t.Fatalf("external storage context = %+v, want cwd repo %q and beads dir %q", got, wantRepo, wantBeads)
 	}
 }
 

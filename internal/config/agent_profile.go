@@ -2,23 +2,18 @@ package config
 
 import "strings"
 
-// AgentProfile represents the explicit policy profile that controls agent
-// git/commit authority (gh#3423, follow-up to #4220's PROFILE_VOCABULARY doc).
+// AgentProfile is a legacy compatibility setting. Generated Beads context no
+// longer uses it to grant or revoke source-control permissions.
 //
 // See docs/getting-started/ide-setup.md "Policy Profiles" for the full description of each value.
 type AgentProfile string
 
 const (
-	// ProfileConservative is the default: report changed files, validation,
-	// and proposed commands; do not commit, push, or run Dolt remote sync
-	// without explicit user or orchestrator approval.
+	// ProfileConservative is the legacy default value.
 	ProfileConservative AgentProfile = "conservative"
-	// ProfileMinimal has the same git authority as ProfileConservative; it
-	// only differs in how much text hook-first integrations install.
+	// ProfileMinimal is retained for compatibility with existing config.
 	ProfileMinimal AgentProfile = "minimal"
-	// ProfileTeamMaintainer allows an agent to close beads, run quality
-	// gates, commit, `bd dolt push`, and `git push` as part of routine work,
-	// subordinate to any explicit "do not commit"/"do not push" instruction.
+	// ProfileTeamMaintainer is retained for compatibility with existing config.
 	ProfileTeamMaintainer AgentProfile = "team-maintainer"
 )
 
@@ -44,7 +39,7 @@ func IsValidAgentProfile(profile string) bool {
 	return validAgentProfiles[AgentProfile(strings.ToLower(strings.TrimSpace(profile)))]
 }
 
-// GetAgentProfile retrieves the explicit agent policy profile.
+// GetAgentProfile retrieves the legacy agent profile value.
 //
 // Config key: agent.profile
 // Env var: BD_AGENT_PROFILE (bound automatically via viper's BD env prefix)

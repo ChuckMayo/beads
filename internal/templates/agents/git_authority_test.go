@@ -7,9 +7,10 @@ import (
 
 func TestGeneratedAgentSectionsNeverAssertGitAuthority(t *testing.T) {
 	surfaces := map[string]string{
-		"full":    RenderSection(ProfileFull),
-		"minimal": RenderSection(ProfileMinimal),
-		"codex":   CodexSectionBody(),
+		"greenfield": EmbeddedDefault(),
+		"full":       RenderSection(ProfileFull),
+		"minimal":    RenderSection(ProfileMinimal),
+		"codex":      CodexSectionBody(),
 	}
 	for name, content := range surfaces {
 		t.Run(name, func(t *testing.T) {
