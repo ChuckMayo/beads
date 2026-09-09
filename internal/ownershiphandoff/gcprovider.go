@@ -14,44 +14,53 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const gcHandoffSchemaVersion = 1
+
+const defaultGCHandoffTimeout = 30 * time.Second
+
+const maxGCHandoffProtocolOutput = 1 << 20
 
 // GCProvider invokes the explicit hidden Gas City handoff protocol. The
 // binary path must be absolute, canonical, and executable; no PATH lookup or
 // process-state fallback is permitted.
 type GCProvider struct {
-	Binary string
+	Binary  string
+	timeout time.Duration
 }
 
 // NewGCProvider validates a trusted absolute GC executable path.
 func NewGCProvider(binary string) (Provider, error) {
-	if err := validateGCExecutable(binary); err != nil {
+	canonical, err := canonicalGCExecutable(binary)
+	if err != nil {
 		return nil, err
 	}
-	return &GCProvider{Binary: binary}, nil
+	return &GCProvider{Binary: canonical, timeout: defaultGCHandoffTimeout}, nil
 }
 
 func validateGCExecutable(binary string) error {
+	_, err := canonicalGCExecutable(binary)
+	return err
+}
+
+func canonicalGCExecutable(binary string) (string, error) {
 	if !filepath.IsAbs(binary) || filepath.Clean(binary) != binary {
-		return CodedError{Code: "provider_unavailable", Err: errors.New("GC_BIN must be an absolute canonical path")}
+		return "", CodedError{Code: "provider_unavailable", Err: errors.New("GC_BIN must be an absolute canonical path")}
 	}
 	info, err := os.Lstat(binary)
 	if err != nil {
-		return CodedError{Code: "provider_unavailable", Err: fmt.Errorf("stat GC_BIN: %w", err)}
+		return "", CodedError{Code: "provider_unavailable", Err: fmt.Errorf("stat GC_BIN: %w", err)}
 	}
 	if !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
-		return CodedError{Code: "provider_unavailable", Err: errors.New("GC_BIN must be an executable regular file")}
+		return "", CodedError{Code: "provider_unavailable", Err: errors.New("GC_BIN must be an executable regular file")}
 	}
 	real, err := filepath.EvalSymlinks(binary)
-	if err != nil || real != binary {
-		if err == nil {
-			err = errors.New("GC_BIN must not be symlinked")
-		}
-		return CodedError{Code: "provider_unavailable", Err: err}
+	if err != nil {
+		return "", CodedError{Code: "provider_unavailable", Err: fmt.Errorf("resolve GC_BIN: %w", err)}
 	}
-	return nil
+	return real, nil
 }
 
 // NewGCProviderFromEnv creates a provider using the trusted GC_BIN
@@ -150,10 +159,33 @@ func (p *GCProvider) OwnershipHandoffHooks(ctx context.Context, r Request) (Hook
 			}
 			return nil
 		},
-		Verify:       func(context.Context, Request, Snapshot) error { return nil },
-		Commit:       func(context.Context, Request, Snapshot) error { return nil },
-		CommitReplay: func(context.Context, Request, Snapshot) error { return nil },
+		Verify: func(verifyCtx context.Context, request Request, _ Snapshot) error {
+			return p.verifyStopped(verifyCtx, request)
+		},
+		Commit: func(commitCtx context.Context, request Request, _ Snapshot) error {
+			return p.verifyStopped(commitCtx, request)
+		},
+		CommitReplay: func(commitCtx context.Context, request Request, _ Snapshot) error {
+			return p.verifyStopped(commitCtx, request)
+		},
 	}, nil
+}
+
+// verifyStopped asks the lifecycle owner to re-inspect the captured scope.
+// A post-stop inspect must refuse with process_missing; any eligible or other
+// response means the legacy owner has not proven that it released the scope.
+func (p *GCProvider) verifyStopped(ctx context.Context, r Request) error {
+	response, _, err := p.invoke(ctx, r, "handoff-inspect", "")
+	if err != nil {
+		return err
+	}
+	if response.Operation != "handoff-inspect" {
+		return CodedError{Code: "protocol_version", Err: errors.New("GC handoff verification returned an unexpected operation")}
+	}
+	if response.Result == "refused" && response.ErrorCode == "process_missing" {
+		return nil
+	}
+	return CodedError{Code: "verification_failed", Err: errors.New("GC handoff verification did not confirm the legacy owner stopped")}
 }
 
 func (p *GCProvider) invoke(ctx context.Context, r Request, operation, token string) (gcHandoffResponse, []byte, error) {
@@ -167,21 +199,52 @@ func (p *GCProvider) invoke(ctx context.Context, r Request, operation, token str
 	if token != "" {
 		args = append(args, "--identity-token", token)
 	}
-	cmd := exec.CommandContext(ctx, p.Binary, args...) // #nosec G204 -- Binary is validated by NewGCProvider.
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = defaultGCHandoffTimeout
+	}
+	commandCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, p.Binary, args...) // #nosec G204 -- Binary is validated by NewGCProvider.
+	stdout := &limitedBuffer{limit: maxGCHandoffProtocolOutput}
+	stderr := &limitedBuffer{limit: maxGCHandoffProtocolOutput}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	runErr := cmd.Run()
 	response, err := decodeGCResponse(stdout.Bytes())
 	if err != nil {
 		if runErr != nil {
-			return gcHandoffResponse{}, nil, CodedError{Code: "provider_unavailable", Err: errors.New("GC handoff protocol command failed")}
+			return gcHandoffResponse{}, nil, CodedError{Code: "provider_unavailable", Err: protocolCommandError(commandCtx, runErr, stderr.String())}
 		}
 		return gcHandoffResponse{}, nil, err
 	}
 	if runErr != nil && response.Result != "refused" {
-		return gcHandoffResponse{}, nil, CodedError{Code: "provider_unavailable", Err: errors.New("GC handoff protocol command failed")}
+		return gcHandoffResponse{}, nil, CodedError{Code: "provider_unavailable", Err: protocolCommandError(commandCtx, runErr, stderr.String())}
 	}
 	return response, stdout.Bytes(), nil
+}
+
+func protocolCommandError(ctx context.Context, runErr error, stderr string) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errors.New("GC handoff protocol command timed out")
+	}
+	if detail := strings.TrimSpace(stderr); detail != "" {
+		return fmt.Errorf("GC handoff protocol command failed: %s", detail)
+	}
+	return fmt.Errorf("GC handoff protocol command failed: %w", runErr)
+}
+
+type limitedBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	remaining := b.limit - b.Len()
+	if remaining <= 0 || len(p) > remaining {
+		return 0, errors.New("GC handoff protocol output exceeds limit")
+	}
+	return b.Buffer.Write(p)
 }
 
 func decodeGCResponse(raw []byte) (gcHandoffResponse, error) {
