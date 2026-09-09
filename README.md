@@ -1,3 +1,5 @@
+beads without the bullshit
+
 # bd - Beads
 
 **Distributed graph issue tracker for AI agents, powered by [Dolt](https://github.com/dolthub/dolt).**
