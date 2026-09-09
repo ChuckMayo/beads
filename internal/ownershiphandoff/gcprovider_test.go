@@ -209,6 +209,38 @@ func TestGCProviderStopRefusalReportsProviderMutation(t *testing.T) {
 	}
 }
 
+func TestGCProviderRetryRetainsReportedPartialMutation(t *testing.T) {
+	city := canonicalTestDir(t)
+	scope := filepath.Join(city, "scope")
+	if err := os.Mkdir(scope, 0700); err != nil {
+		t.Fatal(err)
+	}
+	binary := fakeGCProtocol(t)
+	t.Setenv("GC_HANDOFF_LOG", filepath.Join(city, "gc.log"))
+	t.Setenv("GC_HANDOFF_ERR_LOG", filepath.Join(city, "gc.err"))
+	t.Setenv("GC_HANDOFF_STOP_REFUSE", "1")
+	t.Setenv("GC_HANDOFF_STOP_MUTATES", "true")
+	request := Request{CityRoot: city, Root: scope, Database: "beads", Workspace: "ws", Endpoint: Endpoint{Host: "127.0.0.1", Port: 3307}, Owner: OwnerLegacyGC}
+	provider, err := NewGCProvider(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(scope, "ownership-handoff.json")
+	first, err := Run(context.Background(), request, journalPath, provider, false)
+	if err == nil || !first.Mutates || first.Phase != PhaseTargetConfigured {
+		t.Fatalf("first result=%+v err=%v, want partial mutation", first, err)
+	}
+	t.Setenv("GC_HANDOFF_STOP_MUTATES", "false")
+	second, err := Run(context.Background(), request, journalPath, provider, false)
+	if err == nil || !second.Mutates || second.Phase != PhaseTargetConfigured {
+		t.Fatalf("second result=%+v err=%v, want retained partial mutation", second, err)
+	}
+	journal, err := Load(journalPath)
+	if err != nil || !journal.MutationOccurred {
+		t.Fatalf("journal=%+v err=%v, want retained mutation_occurred", journal, err)
+	}
+}
+
 func TestGCProviderResumeUsesPersistedSnapshotToken(t *testing.T) {
 	city := canonicalTestDir(t)
 	scope := filepath.Join(city, "scope")

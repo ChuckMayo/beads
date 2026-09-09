@@ -601,7 +601,7 @@ func executeLocked(ctx context.Context, r Request, journalPath string, h Hooks) 
 		}
 		if err := h.StopLegacy(ctx, r, j.Snapshot); err != nil {
 			if mutates, reported := reportedMutation(err); reported {
-				j.MutationOccurred = mutates
+				j.MutationOccurred = j.MutationOccurred || mutates
 			}
 			return fail(handoffErrorCode(err, "owner_stop_failed"), err)
 		}
