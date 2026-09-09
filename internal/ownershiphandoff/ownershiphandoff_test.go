@@ -198,7 +198,7 @@ func TestRunLockConflictPreservesExistingJournal(t *testing.T) {
 		called = true
 		return Hooks{}, nil
 	}), false)
-	if err == nil || got.Phase != PhaseTargetConfigured || got.Owner != OwnerLegacyGC || !got.Mutates ||
+	if err == nil || got.Phase != PhaseTargetConfigured || got.Owner != OwnerLegacyGC || got.Mutates ||
 		got.ErrorCode != "concurrent_handoff" || called {
 		t.Fatalf("result=%+v err=%v provider=%v, want existing state and lock refusal", got, err, called)
 	}

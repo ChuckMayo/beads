@@ -77,6 +77,7 @@ type Journal struct {
 	SnapshotCaptured     bool      `json:"snapshot_captured,omitempty"`
 	CommitHookInProgress bool      `json:"commit_hook_in_progress,omitempty"`
 	CommitHookRan        bool      `json:"commit_hook_ran,omitempty"`
+	MutationOccurred     bool      `json:"mutation_occurred,omitempty"`
 	Phase                Phase     `json:"phase"`
 	Owner                Owner     `json:"owner"`
 	ErrorCode            string    `json:"error_code,omitempty"`
@@ -135,6 +136,25 @@ func (f ProviderFunc) OwnershipHandoffHooks(ctx context.Context, r Request) (Hoo
 type CodedError struct {
 	Code string
 	Err  error
+}
+
+type mutationReporter interface {
+	HandoffMutationOccurred() bool
+}
+
+type mutationError struct {
+	err     error
+	mutates bool
+}
+
+func (e mutationError) Error() string { return e.err.Error() }
+
+func (e mutationError) Unwrap() error { return e.err }
+
+func (e mutationError) HandoffMutationOccurred() bool { return e.mutates }
+
+func withReportedMutation(err error, mutates bool) error {
+	return mutationError{err: err, mutates: mutates}
 }
 
 // Error implements error.
@@ -447,8 +467,16 @@ func Run(ctx context.Context, r Request, journalPath string, provider Provider, 
 }
 
 func mutationOccurred(j Journal) bool {
-	return j.Phase == PhaseTargetConfigured || j.Phase == PhaseOldOwnerStopped || j.Phase == PhaseVerified ||
+	return j.MutationOccurred || j.Phase == PhaseOldOwnerStopped || j.Phase == PhaseVerified ||
 		j.Phase == PhaseCommitted || j.CommitHookRan || j.CommitHookInProgress
+}
+
+func reportedMutation(err error) (bool, bool) {
+	var reporter mutationReporter
+	if !errors.As(err, &reporter) {
+		return false, false
+	}
+	return reporter.HandoffMutationOccurred(), true
 }
 
 func handoffErrorCode(err error, fallback string) string {
@@ -572,8 +600,12 @@ func executeLocked(ctx context.Context, r Request, journalPath string, h Hooks) 
 			return fail("owner_stop_unavailable", errors.New("legacy owner stop hook is required"))
 		}
 		if err := h.StopLegacy(ctx, r, j.Snapshot); err != nil {
+			if mutates, reported := reportedMutation(err); reported {
+				j.MutationOccurred = mutates
+			}
 			return fail(handoffErrorCode(err, "owner_stop_failed"), err)
 		}
+		j.MutationOccurred = true
 		j.Phase = PhaseOldOwnerStopped
 		j.UpdatedAt = time.Now().UTC()
 		if err := save(journalPath, j); err != nil {

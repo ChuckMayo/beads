@@ -115,32 +115,22 @@ func (p *GCProvider) OwnershipHandoffHooks(ctx context.Context, r Request) (Hook
 	if r.CityRoot == "" {
 		return Hooks{}, CodedError{Code: "invalid_request", Err: errors.New("city root is required by the GC handoff protocol")}
 	}
-	response, raw, err := p.invoke(ctx, r, "handoff-inspect", "")
-	if err != nil {
-		return Hooks{}, err
-	}
-	if response.Operation != "handoff-inspect" {
-		return Hooks{}, CodedError{Code: "protocol_version", Err: errors.New("GC handoff inspect returned an unexpected operation")}
-	}
-	if response.Result != "eligible" {
-		return Hooks{}, responseError(response, "handoff inspect refused")
-	}
-	if err := validateGCIdentity(r, response); err != nil {
-		return Hooks{}, err
-	}
-	if err := validateIdentityToken(response.IdentityToken); err != nil {
-		return Hooks{}, err
-	}
-	metadata := append([]byte(nil), raw...)
-	identityToken := response.IdentityToken
 	return Hooks{
-		Snapshot: func(context.Context, Request) (Snapshot, error) {
-			return Snapshot{Metadata: metadata, Sentinel: identityToken}, nil
+		Snapshot: func(snapshotCtx context.Context, request Request) (Snapshot, error) {
+			response, raw, err := p.inspect(snapshotCtx, request)
+			if err != nil {
+				return Snapshot{}, err
+			}
+			return Snapshot{Metadata: append([]byte(nil), raw...), Sentinel: response.IdentityToken}, nil
 		},
 		// GC already owns target configuration. Configure is intentionally a
 		// config-only no-op; it must never start a second server.
 		Configure: func(context.Context, Request, Snapshot) error { return nil },
-		StopLegacy: func(stopCtx context.Context, request Request, _ Snapshot) error {
+		StopLegacy: func(stopCtx context.Context, request Request, snapshot Snapshot) error {
+			identityToken, err := snapshotIdentityToken(request, snapshot)
+			if err != nil {
+				return err
+			}
 			stopped, _, err := p.invoke(stopCtx, request, "handoff-stop", identityToken)
 			if err != nil {
 				return err
@@ -149,13 +139,13 @@ func (p *GCProvider) OwnershipHandoffHooks(ctx context.Context, r Request) (Hook
 				return CodedError{Code: "protocol_version", Err: errors.New("GC handoff stop returned an unexpected operation")}
 			}
 			if stopped.Result != "stopped" || !stopped.Mutates {
-				return responseError(stopped, "GC handoff stop refused")
+				return withReportedMutation(responseError(stopped, "GC handoff stop refused"), stopped.Mutates)
 			}
 			if err := validateGCIdentity(request, stopped); err != nil {
-				return err
+				return withReportedMutation(err, stopped.Mutates)
 			}
 			if stopped.IdentityToken != identityToken {
-				return CodedError{Code: "identity_changed", Err: errors.New("GC handoff stop token changed")}
+				return withReportedMutation(CodedError{Code: "identity_changed", Err: errors.New("GC handoff stop token changed")}, stopped.Mutates)
 			}
 			return nil
 		},
@@ -169,6 +159,46 @@ func (p *GCProvider) OwnershipHandoffHooks(ctx context.Context, r Request) (Hook
 			return p.verifyStopped(commitCtx, request)
 		},
 	}, nil
+}
+
+func (p *GCProvider) inspect(ctx context.Context, r Request) (gcHandoffResponse, []byte, error) {
+	response, raw, err := p.invoke(ctx, r, "handoff-inspect", "")
+	if err != nil {
+		return gcHandoffResponse{}, nil, err
+	}
+	if response.Operation != "handoff-inspect" {
+		return gcHandoffResponse{}, nil, CodedError{Code: "protocol_version", Err: errors.New("GC handoff inspect returned an unexpected operation")}
+	}
+	if response.Result != "eligible" {
+		return gcHandoffResponse{}, nil, responseError(response, "handoff inspect refused")
+	}
+	if err := validateGCIdentity(r, response); err != nil {
+		return gcHandoffResponse{}, nil, err
+	}
+	if err := validateIdentityToken(response.IdentityToken); err != nil {
+		return gcHandoffResponse{}, nil, err
+	}
+	return response, raw, nil
+}
+
+func snapshotIdentityToken(r Request, snapshot Snapshot) (string, error) {
+	response, err := decodeGCResponse(snapshot.Metadata)
+	if err != nil {
+		return "", err
+	}
+	if response.Operation != "handoff-inspect" || response.Result != "eligible" {
+		return "", CodedError{Code: "protocol_version", Err: errors.New("handoff snapshot is not an eligible inspect response")}
+	}
+	if err := validateGCIdentity(r, response); err != nil {
+		return "", err
+	}
+	if err := validateIdentityToken(response.IdentityToken); err != nil {
+		return "", err
+	}
+	if snapshot.Sentinel != response.IdentityToken {
+		return "", CodedError{Code: "identity_changed", Err: errors.New("handoff snapshot token does not match its inspect response")}
+	}
+	return response.IdentityToken, nil
 }
 
 // verifyStopped asks the lifecycle owner to re-inspect the captured scope.
@@ -206,6 +236,7 @@ func (p *GCProvider) invoke(ctx context.Context, r Request, operation, token str
 	commandCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(commandCtx, p.Binary, args...) // #nosec G204 -- Binary is validated by NewGCProvider.
+	configureGCHandoffCommand(cmd)
 	stdout := &limitedBuffer{limit: maxGCHandoffProtocolOutput}
 	stderr := &limitedBuffer{limit: maxGCHandoffProtocolOutput}
 	cmd.Stdout = stdout
