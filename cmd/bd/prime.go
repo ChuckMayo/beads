@@ -90,8 +90,8 @@ Designed for Claude Code, Gemini CLI, and Codex SessionStart hooks to prevent
 agents from forgetting bd workflow after context compaction.
 
 Config options:
-- no-git-ops: Legacy name for hiding Beads-managed Git integration hints.
-  This setting never grants or revokes source-control permissions.
+- no-git-ops: Legacy compatibility key retained for existing stealth setups.
+  Prime ignores it and never derives source-control permissions from Beads state.
   Set via: bd config set no-git-ops true
 
 	Workflow customization:
@@ -180,7 +180,7 @@ Config options:
 func init() {
 	primeCmd.Flags().BoolVar(&primeFullMode, "full", false, "Force full CLI output (ignore MCP detection)")
 	primeCmd.Flags().BoolVar(&primeMCPMode, "mcp", false, "Force MCP mode (minimal output)")
-	primeCmd.Flags().BoolVar(&primeStealthMode, "stealth", false, "Hide Beads-managed Git integration hints")
+	primeCmd.Flags().BoolVar(&primeStealthMode, "stealth", false, "Legacy compatibility flag; prime stays source-control neutral")
 	primeCmd.Flags().BoolVar(&primeExportMode, "export", false, "Output default content (ignores PRIME.md override)")
 	primeCmd.Flags().BoolVar(&primeMemoriesOnly, "memories-only", false, "Output only persistent memories for compact hook contexts")
 	primeCmd.Flags().BoolVar(&primeHookJSONMode, "hook-json", false, "Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)")

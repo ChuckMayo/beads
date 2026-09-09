@@ -9,7 +9,7 @@ on:
       - 'v*-chuck.*'
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   BD_DISABLE_METRICS: "1"
@@ -72,21 +72,17 @@ jobs:
             sha256sum "${staging}.tar.gz" >> checksums.txt
           done
 
-      - name: Create fork release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --prerelease \
-            --title "$GITHUB_REF_NAME — beads without the bullshit" \
-            --notes "Pinned ChuckMayo fork build. Beads never grants or revokes source Git permissions. Includes the verified -C working-directory fix." \
-            beads_*_linux_*.tar.gz checksums.txt
+      - name: Upload Linux packages for validation or release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-linux-packages
+          path: |
+            beads_*_linux_*.tar.gz
+            checksums.txt
+          if-no-files-found: error
 
   macos:
     name: Validate and package macOS
-    needs: linux
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -125,13 +121,52 @@ jobs:
             shasum -a 256 "${staging}.tar.gz" >> darwin-checksums.txt
           done
 
-      - name: Upload macOS artifacts and combined checksums
-        if: github.event_name == 'push'
+      - name: Upload macOS packages for validation or release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fork-macos-packages
+          path: |
+            beads_*_darwin_*.tar.gz
+            darwin-checksums.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish complete fork release
+    if: github.event_name == 'push'
+    needs: [linux, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Linux packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fork-linux-packages
+          path: release/linux
+
+      - name: Download macOS packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: fork-macos-packages
+          path: release/macos
+
+      - name: Publish all platform packages together
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p release
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --dir release
-          cat darwin-checksums.txt >> release/checksums.txt
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" beads_*_darwin_*.tar.gz --clobber
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" release/checksums.txt --clobber
+          cat release/linux/checksums.txt release/macos/darwin-checksums.txt > release/checksums.txt
+          assets=(
+            release/linux/beads_*_linux_*.tar.gz
+            release/macos/beads_*_darwin_*.tar.gz
+            release/checksums.txt
+          )
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "$GITHUB_REF_NAME — beads without the bullshit" \
+              --notes "Pinned ChuckMayo fork build. Beads never grants or revokes source Git permissions. Includes the verified -C working-directory fix." \
+              "${assets[@]}"
+          fi

@@ -3580,8 +3580,8 @@ Designed for Claude Code, Gemini CLI, and Codex SessionStart hooks to prevent
 agents from forgetting bd workflow after context compaction.
 
 Config options:
-- no-git-ops: Legacy name for hiding Beads-managed Git integration hints.
-  This setting never grants or revokes source-control permissions.
+- no-git-ops: Legacy compatibility key retained for existing stealth setups.
+  Prime ignores it and never derives source-control permissions from Beads state.
   Set via: bd config set no-git-ops true
 
 	Workflow customization:
