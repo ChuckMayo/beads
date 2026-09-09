@@ -1,6 +1,9 @@
-name: Fork Release
+name: Fork CI and Release
 
 on:
+  pull_request:
+    branches:
+      - 'charlie/v1.2.2-stable'
   push:
     tags:
       - 'v*-chuck.*'
@@ -14,7 +17,7 @@ env:
 
 jobs:
   linux:
-    name: Validate and release Linux
+    name: Validate and package Linux
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -70,6 +73,7 @@ jobs:
           done
 
       - name: Create fork release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -81,7 +85,7 @@ jobs:
             beads_*_linux_*.tar.gz checksums.txt
 
   macos:
-    name: Release macOS
+    name: Validate and package macOS
     needs: linux
     runs-on: macos-latest
     steps:
@@ -122,6 +126,7 @@ jobs:
           done
 
       - name: Upload macOS artifacts and combined checksums
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
