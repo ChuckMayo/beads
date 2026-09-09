@@ -26,13 +26,17 @@ on:
       - 'cmd/bd/init*.go'
       - 'cmd/bd/proxied_integration_helpers_test.go'
       - 'cmd/bd/linear_proxy_*'
+      - 'cmd/bd/jira_proxy_*'
+      - 'cmd/bd/jira.go'
       - 'cmd/bd/store_factory*.go'
+      - 'cmd/bd/sync_push_pull.go'
       - 'cmd/bd/test_dolt_server_cgo_test.go'
       - 'cmd/bd/uow_factory.go'
       - 'internal/configfile/**'
       - 'internal/doltserver/**'
       - 'internal/storage/dbproxy/**'
       - 'internal/storage/uow/**'
+      - 'internal/jira/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/proxied-local-smoke.yml'
@@ -45,13 +49,17 @@ on:
       - 'cmd/bd/init*.go'
       - 'cmd/bd/proxied_integration_helpers_test.go'
       - 'cmd/bd/linear_proxy_*'
+      - 'cmd/bd/jira_proxy_*'
+      - 'cmd/bd/jira.go'
       - 'cmd/bd/store_factory*.go'
+      - 'cmd/bd/sync_push_pull.go'
       - 'cmd/bd/test_dolt_server_cgo_test.go'
       - 'cmd/bd/uow_factory.go'
       - 'internal/configfile/**'
       - 'internal/doltserver/**'
       - 'internal/storage/dbproxy/**'
       - 'internal/storage/uow/**'
+      - 'internal/jira/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/proxied-local-smoke.yml'
@@ -108,7 +116,13 @@ jobs:
             TestManagedLocalProxiedLinearStatusParity \
             TestManagedLocalProxiedLinearPullPushParity \
             TestManagedLocalProxiedLinearConflictResolutionParity \
-            TestManagedLocalProxiedLinearDryRunParity
+            TestManagedLocalProxiedLinearDryRunParity \
+            TestManagedLocalProxiedJiraStatusParity \
+            TestManagedLocalProxiedJiraPullPushParity \
+            TestManagedLocalProxiedJiraConflictJSONParity \
+            TestManagedLocalProxiedJiraPreferExternalConflictParity \
+            TestManagedLocalProxiedJiraDefaultConflictParity \
+            TestManagedLocalProxiedJiraDryRunParity
           do
             if ! grep -qx "$test_name" <<<"$listed"; then
               echo "managed-local lifecycle test $test_name is missing; got: '$listed'" >&2
