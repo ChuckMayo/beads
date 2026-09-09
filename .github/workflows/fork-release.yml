@@ -1,0 +1,124 @@
+name: Fork Release
+
+on:
+  push:
+    tags:
+      - 'v*-chuck.*'
+
+permissions:
+  contents: write
+
+env:
+  BD_DISABLE_METRICS: "1"
+  BD_DISABLE_EVENT_FLUSH: "1"
+
+jobs:
+  linux:
+    name: Validate and release Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Run regression and template tests
+        run: >-
+          ./scripts/test.sh
+          -run '^(TestOutputContextFunction|TestPrimeNeverEmitsGitAuthority|TestDirectoryFlagChangesCommandWorkingDirectory|TestCodexHook.*|TestEmbeddedDefault.*|TestRenderSection.*|TestGeneratedAgentSectionsNeverAssertGitAuthority|TestGeneratedRecipesNeverAssertGitAuthority)$'
+          ./cmd/bd ./internal/templates/agents ./internal/recipes
+
+      - name: Build and package Linux binaries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse HEAD)"
+          short_commit="$(git rev-parse --short HEAD)"
+          for arch in amd64 arm64; do
+            if [ "$arch" = arm64 ]; then
+              export CC=aarch64-linux-gnu-gcc
+            else
+              export CC=gcc
+            fi
+            export CGO_ENABLED=1 GOOS=linux GOARCH="$arch"
+            staging="beads_${version}_linux_${arch}"
+            mkdir -p "$staging"
+            go build -tags "gms_pure_go netgo" \
+              -ldflags "-s -w -X main.Version=${version} -X main.Build=${short_commit} -X main.Commit=${commit} -X main.Branch=${GITHUB_REF_NAME}" \
+              -o "$staging/bd" ./cmd/bd
+            ./scripts/verify-cgo.sh "$staging/bd"
+            cp LICENSE README.md CHANGELOG.md "$staging/"
+            tar -czf "${staging}.tar.gz" -C "$staging" .
+            sha256sum "${staging}.tar.gz" >> checksums.txt
+          done
+
+      - name: Create fork release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --title "$GITHUB_REF_NAME — beads without the bullshit" \
+            --notes "Pinned ChuckMayo fork build. Beads never grants or revokes source Git permissions. Includes the verified -C working-directory fix." \
+            beads_*_linux_*.tar.gz checksums.txt
+
+  macos:
+    name: Release macOS
+    needs: linux
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build and package macOS binaries
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse HEAD)"
+          short_commit="$(git rev-parse --short HEAD)"
+          for arch in arm64 amd64; do
+            export CGO_ENABLED=1 GOOS=darwin GOARCH="$arch"
+            if [ "$arch" = amd64 ]; then
+              export CC="clang -arch x86_64"
+              export CXX="clang++ -arch x86_64"
+            else
+              export CC=clang
+              export CXX=clang++
+            fi
+            staging="beads_${version}_darwin_${arch}"
+            mkdir -p "$staging"
+            go build -tags "gms_pure_go netgo" \
+              -ldflags "-s -w -X main.Version=${version} -X main.Build=${short_commit} -X main.Commit=${commit} -X main.Branch=${GITHUB_REF_NAME}" \
+              -o "$staging/bd" ./cmd/bd
+            ./scripts/verify-cgo.sh "$staging/bd"
+            codesign -s - -f "$staging/bd"
+            cp LICENSE README.md CHANGELOG.md "$staging/"
+            tar -czf "${staging}.tar.gz" -C "$staging" .
+            shasum -a 256 "${staging}.tar.gz" >> darwin-checksums.txt
+          done
+
+      - name: Upload macOS artifacts and combined checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern checksums.txt --dir release
+          cat darwin-checksums.txt >> release/checksums.txt
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" beads_*_darwin_*.tar.gz --clobber
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" release/checksums.txt --clobber

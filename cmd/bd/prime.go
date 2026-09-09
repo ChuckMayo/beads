@@ -90,9 +90,9 @@ Designed for Claude Code, Gemini CLI, and Codex SessionStart hooks to prevent
 agents from forgetting bd workflow after context compaction.
 
 Config options:
-- no-git-ops: When true, outputs stealth mode (no git commands in session close protocol).
+- no-git-ops: Legacy name for hiding Beads-managed Git integration hints.
+  This setting never grants or revokes source-control permissions.
   Set via: bd config set no-git-ops true
-  Useful when you want to control when commits happen manually.
 
 	Workflow customization:
 	- Place a .beads/PRIME.md file in the local clone or resolved workspace to override the default output entirely.
@@ -180,7 +180,7 @@ Config options:
 func init() {
 	primeCmd.Flags().BoolVar(&primeFullMode, "full", false, "Force full CLI output (ignore MCP detection)")
 	primeCmd.Flags().BoolVar(&primeMCPMode, "mcp", false, "Force MCP mode (minimal output)")
-	primeCmd.Flags().BoolVar(&primeStealthMode, "stealth", false, "Stealth mode (no git operations, flush only)")
+	primeCmd.Flags().BoolVar(&primeStealthMode, "stealth", false, "Hide Beads-managed Git integration hints")
 	primeCmd.Flags().BoolVar(&primeExportMode, "export", false, "Output default content (ignores PRIME.md override)")
 	primeCmd.Flags().BoolVar(&primeMemoriesOnly, "memories-only", false, "Output only persistent memories for compact hook contexts")
 	primeCmd.Flags().BoolVar(&primeHookJSONMode, "hook-json", false, "Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)")
@@ -415,26 +415,7 @@ func formatPrimeMemoryTimeout(compact bool, timeout time.Duration) string {
 
 // outputMCPContext outputs minimal context for MCP users
 func outputMCPContext(w io.Writer, stealthMode bool) error {
-	ephemeral := isEphemeralBranch()
-	noPush := primeNoPushConfigured()
-	localOnly := !primeHasGitRemote()
-
-	var closeProtocol string
-	var profileRule string
-	if stealthMode || localOnly {
-		// Stealth mode or local-only: close issues, no git operations
-		closeProtocol = "Before saying \"done\": bd close <completed-ids>"
-		profileRule = "Git authority: no git operations in this context"
-	} else if ephemeral {
-		closeProtocol = "Before saying \"done\": bd close <completed-ids>; run checks; report git status and proposed handoff (no push - ephemeral branch)"
-		profileRule = "Profile model: conservative by default; commit only with explicit user/orchestrator authority"
-	} else if noPush {
-		closeProtocol = "Before saying \"done\": bd close <completed-ids>; run checks; report git status and proposed handoff (push disabled)"
-		profileRule = "Profile model: conservative by default; push only with explicit user/orchestrator authority"
-	} else {
-		closeProtocol = "Before saying \"done\": bd close <completed-ids>; run checks. Then follow the active profile — conservative reports handoff; team-maintainer may commit/sync/push when explicitly enabled."
-		profileRule = "Default: do not commit, push, or run dolt remote sync without explicit authority. Team-maintainer behavior is opt-in and still subordinate to user/orchestrator instructions."
-	}
+	_ = stealthMode // Retained for CLI compatibility; it never controls source Git.
 
 	redirectNotice := getRedirectNotice(false)
 	memories := formatMemoriesForPrime(true)
@@ -448,7 +429,7 @@ func outputMCPContext(w io.Writer, stealthMode bool) error {
 
 	context += `# 🚨 SESSION CLOSE PROTOCOL 🚨
 
-` + closeProtocol + `
+Before saying "done": bd close <completed-ids>; run relevant checks; report issue state and validation.
 
 ## Core Rules
 - **Default**: Use beads for ALL task tracking (` + "`bd create`" + `, ` + "`bd ready`" + `, ` + "`bd close`" + `)
@@ -456,7 +437,7 @@ func outputMCPContext(w io.Writer, stealthMode bool) error {
 - **Workflow**: Create beads issue BEFORE writing code, mark in_progress when starting
 - **Memory**: Use ` + "`bd remember`" + ` for persistent knowledge. Do NOT use MEMORY.md files.
 - Persistence you don't need beats lost context
-- ` + profileRule + `
+- **Source control**: Follow the current user, orchestrator, and repository instructions. Beads does not grant or revoke source-control permissions.
 
 Start: Check ` + "`ready`" + ` tool for available work.
 `
@@ -467,94 +448,21 @@ Start: Check ` + "`ready`" + ` tool for available work.
 
 // outputCLIContext outputs full CLI reference for non-MCP users
 func outputCLIContext(w io.Writer, stealthMode bool) error {
-	ephemeral := isEphemeralBranch()
-	noPush := primeNoPushConfigured()
-	localOnly := !primeHasGitRemote()
-
-	var closeProtocol string
-	var closeNote string
-	var syncSection string
-	var completingWorkflow string
-	var gitWorkflowRule string
-	var profileRule string
-
-	if stealthMode || localOnly {
-		// Stealth mode or local-only: close issues, no git operations
-		closeProtocol = `[ ] bd close <id1> <id2> ...   (close completed issues)`
-		syncSection = `### Sync & Collaboration
-- ` + "`bd search <query>`" + ` - Search issues by keyword`
-		completingWorkflow = `**Completing work:**
-` + "```bash" + `
-bd close <id1> <id2> ...    # Close all completed issues at once
-` + "```"
-		// Only show local-only note if not in stealth mode (stealth is explicit user choice)
-		if localOnly && !stealthMode {
-			closeNote = "**Note:** No git remote configured. Issues are saved locally only."
-			gitWorkflowRule = "Git workflow: local-only (no git remote)"
-		} else {
-			gitWorkflowRule = "Git workflow: stealth mode (no git ops)"
-		}
-		profileRule = "Git authority: no git operations in this context"
-	} else if ephemeral {
-		closeProtocol = `[ ] 1. bd close <id1> <id2> ...   (close completed issues)
+	_ = stealthMode // Retained for CLI compatibility; it never controls source Git.
+	closeProtocol := `[ ] 1. bd close <id1> <id2> ...   (close completed issues)
 [ ] 2. run quality gates        (tests, linters, builds when relevant)
-[ ] 3. git status               (check what changed)
-[ ] 4. report handoff           (changed files, validation, proposed commit if authorized)`
-		closeNote = "**Note:** This is an ephemeral branch (no upstream). Do not push it unless the user or orchestrator explicitly says to."
-		syncSection = `### Sync & Collaboration
-- ` + "`bd dolt pull`" + ` - Pull beads updates from Dolt remote
-- ` + "`bd dolt push`" + ` - Push beads to Dolt remote
+[ ] 3. sync Beads if appropriate (bd dolt push)
+[ ] 4. report issue state and validation`
+	closeNote := "**Source control:** Follow the current user, orchestrator, and repository instructions. Beads does not grant or revoke source-control permissions."
+	syncSection := `### Sync & Collaboration
+- ` + "`bd dolt push`" + ` - Push Beads issue data to its Dolt remote
+- ` + "`bd dolt pull`" + ` - Pull Beads issue data from its Dolt remote
 - ` + "`bd search <query>`" + ` - Search issues by keyword`
-		completingWorkflow = `**Completing work:**
+	completingWorkflow := `**Completing work:**
 ` + "```bash" + `
 bd close <id1> <id2> ...    # Close all completed issues at once
-bd dolt pull                # Pull latest beads from main
-git status                  # Report changed files and proposed commit; wait for authority
-# Merge to main locally only when the active instructions grant that authority
+bd dolt push                # Sync Beads issue data when configured
 ` + "```"
-		gitWorkflowRule = "Git workflow: conservative by default on ephemeral branches"
-		profileRule = "Profile model: conservative/minimal report handoff; team-maintainer may commit only when explicitly enabled"
-	} else if noPush {
-		closeProtocol = `[ ] 1. bd close <id1> <id2> ...   (close completed issues)
-[ ] 2. run quality gates        (tests, linters, builds when relevant)
-[ ] 3. git status               (check what changed)
-[ ] 4. report handoff           (push disabled; wait for explicit authority)`
-		closeNote = "**Note:** Push disabled via config. Do not push unless the user or orchestrator explicitly says to."
-		syncSection = `### Sync & Collaboration
-- ` + "`bd dolt push`" + ` - Push beads to Dolt remote
-- ` + "`bd dolt pull`" + ` - Pull beads from Dolt remote
-- ` + "`bd search <query>`" + ` - Search issues by keyword`
-		completingWorkflow = `**Completing work:**
-` + "```bash" + `
-bd close <id1> <id2> ...    # Close all completed issues at once
-git status                  # Report changed files and proposed commands
-# Do not push unless current instructions explicitly allow it
-` + "```"
-		gitWorkflowRule = "Git workflow: push disabled; report handoff unless explicitly authorized"
-		profileRule = "Profile model: conservative/minimal report handoff; team-maintainer still respects no-push/user instructions"
-	} else {
-		closeProtocol = `[ ] 1. bd close <id1> <id2> ...   (close completed issues)
-[ ] 2. run quality gates        (tests, linters, builds when relevant)
-[ ] 3. git status               (check what changed)
-[ ] 4. follow active profile    (conservative: report handoff; team-maintainer: commit/sync/push if enabled)`
-		closeNote = "**Policy:** Conservative is the default. Commit, sync, or push only when the active user, orchestrator, or repository profile grants that authority."
-		syncSection = `### Sync & Collaboration
-- ` + "`bd dolt push`" + ` - Push beads to Dolt remote
-- ` + "`bd dolt pull`" + ` - Pull beads from Dolt remote
-- ` + "`bd search <query>`" + ` - Search issues by keyword`
-		completingWorkflow = `**Completing work:**
-` + "```bash" + `
-bd close <id1> <id2> ...    # Close all completed issues at once
-git status                  # Check changed files
-# Conservative/minimal/default: report status and proposed commands; wait for approval
-# Team-maintainer opt-in only, unless current instructions forbid it:
-# git add . && git commit -m "..."
-# bd dolt push
-# git push
-` + "```"
-		gitWorkflowRule = "Git workflow: conservative by default; commit/push only with explicit user/orchestrator or team-maintainer authority"
-		profileRule = "Default: do not commit, push, or run dolt remote sync without explicit authority. Team-maintainer behavior is opt-in and still subordinate to user/orchestrator instructions."
-	}
 
 	redirectNotice := getRedirectNotice(true)
 	memories := formatMemoriesForPrime(false)
@@ -585,8 +493,7 @@ git status                  # Check changed files
 - **Workflow**: Create beads issue BEFORE writing code, mark in_progress when starting
 - **Memory**: Use ` + "`bd remember \"insight\"`" + ` for persistent knowledge across sessions. Do NOT use MEMORY.md files — they fragment across accounts. Search with ` + "`bd memories <keyword>`" + `.
 - Persistence you don't need beats lost context
-- ` + profileRule + `
-- ` + gitWorkflowRule + `
+- **Source control**: Follow the current user, orchestrator, and repository instructions. Beads does not grant or revoke source-control permissions.
 - Session management: check ` + "`bd ready`" + ` for available work
 
 ## Essential Commands

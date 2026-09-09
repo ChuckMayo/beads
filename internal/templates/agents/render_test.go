@@ -426,9 +426,9 @@ func TestRenderSectionWithOptsNoRemoteFull(t *testing.T) {
 		t.Error("full profile with HasRemote=false should not contain 'bd dolt push'")
 	}
 
-	// Should still contain other session completion content
-	if !strings.Contains(section, "git push") {
-		t.Error("should still contain 'git push'")
+	// Source-control authority is outside Beads' remit and must remain explicit.
+	if !strings.Contains(section, "Beads does not grant or revoke") {
+		t.Error("should retain the source-control boundary")
 	}
 	if !strings.Contains(section, "Session Completion") {
 		t.Error("should still contain Session Completion section")
@@ -443,8 +443,8 @@ func TestRenderSectionWithOptsNoRemoteMinimal(t *testing.T) {
 		t.Error("minimal profile with HasRemote=false should not contain 'bd dolt push'")
 	}
 
-	if !strings.Contains(section, "git push") {
-		t.Error("should still contain 'git push'")
+	if !strings.Contains(section, "Beads does not grant or revoke") {
+		t.Error("should retain the source-control boundary")
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/debug"
 	"github.com/steveyegge/beads/internal/doltserver"
+	beadsgit "github.com/steveyegge/beads/internal/git"
 	"github.com/steveyegge/beads/internal/hooks"
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/molecules"
@@ -68,7 +69,10 @@ type envSnapshotValue struct {
 	ok    bool
 }
 
-var changeDirEnvSnapshot map[string]envSnapshotValue
+var (
+	changeDirEnvSnapshot map[string]envSnapshotValue
+	changeDirCWDSnapshot string
+)
 
 var (
 	sandboxMode       bool
@@ -600,21 +604,40 @@ func applyChangeDirSelection() error {
 	if strings.TrimSpace(changeDir) == "" {
 		return nil
 	}
+	targetDir, err := filepath.Abs(changeDir)
+	if err != nil {
+		return HandleError("cannot resolve -C directory %q: %v", changeDir, err)
+	}
 	beadsDir, err := resolveChangeDirBeadsDir(changeDir)
 	if err != nil {
 		return HandleError("%v", err)
 	}
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return HandleError("cannot capture current directory before -C %q: %v", changeDir, err)
+	}
 	changeDirEnvSnapshot = make(map[string]envSnapshotValue, 3)
+	changeDirCWDSnapshot = originalDir
 	for _, key := range []string{"BEADS_DIR", "BEADS_DB", "BD_DB"} {
 		value, ok := os.LookupEnv(key)
 		changeDirEnvSnapshot[key] = envSnapshotValue{value: value, ok: ok}
 	}
-	_ = os.Setenv("BEADS_DIR", beadsDir)
+	if err := os.Chdir(targetDir); err != nil {
+		changeDirEnvSnapshot = nil
+		changeDirCWDSnapshot = ""
+		return HandleError("cannot use -C directory %q: %v", changeDir, err)
+	}
+	beads.ResetCaches()
+	beadsgit.ResetCaches()
+	if err := os.Setenv("BEADS_DIR", beadsDir); err != nil {
+		restoreChangeDirSelection()
+		return HandleError("cannot select beads workspace for -C %q: %v", changeDir, err)
+	}
 	return nil
 }
 
 func restoreChangeDirSelection() {
-	if changeDirEnvSnapshot == nil {
+	if changeDirEnvSnapshot == nil && changeDirCWDSnapshot == "" {
 		return
 	}
 	for key, snapshot := range changeDirEnvSnapshot {
@@ -624,7 +647,13 @@ func restoreChangeDirSelection() {
 			_ = os.Unsetenv(key)
 		}
 	}
+	if changeDirCWDSnapshot != "" {
+		_ = os.Chdir(changeDirCWDSnapshot)
+	}
 	changeDirEnvSnapshot = nil
+	changeDirCWDSnapshot = ""
+	beads.ResetCaches()
+	beadsgit.ResetCaches()
 }
 
 var rootCmd = &cobra.Command{
@@ -641,6 +670,12 @@ var rootCmd = &cobra.Command{
 		_ = cmd.Help() // Help() always returns nil for cobra commands
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// -C is process context, not merely Beads database selection. Apply it
+		// before any command initialization can observe or cache the caller cwd.
+		if err := applyChangeDirSelection(); err != nil {
+			return err
+		}
+
 		// Initialize CommandContext to hold runtime state (replaces scattered globals)
 		initCommandContext()
 
@@ -697,10 +732,6 @@ var rootCmd = &cobra.Command{
 		// Apply verbosity flags early (before any output)
 		debug.SetVerbose(verboseFlag)
 		debug.SetQuiet(quietFlag)
-
-		if err := applyChangeDirSelection(); err != nil {
-			return err
-		}
 
 		// Block dangerous env var overrides that could cause data fragmentation (bd-hevyw).
 		if err := checkBlockedEnvVars(); err != nil {
@@ -1490,6 +1521,9 @@ func main() {
 	registerHelpAllFlag()
 
 	executedCmd, err := rootCmd.ExecuteC()
+	// PersistentPostRunE restores -C on success. Cobra skips post-runs on
+	// command and pre-run errors, so restore those paths here as well.
+	restoreChangeDirSelection()
 
 	// Finalize queued metrics and detach the uploader. Shared with the os.Exit
 	// guards (CheckReadonly and the pre-run gates) so every exit path flushes the

@@ -35,11 +35,11 @@ Template profiles control how much text gets installed. Policy profiles control 
 
 | Policy | Default Scope | Commit/Push Guidance |
 |--------|---------------|----------------------|
-| `conservative` | Standalone projects, unknown projects, and one-off assistance | Use `bd` for task tracking, then report changed files, validation, and proposed commands. Do not commit, push, or run Dolt remote sync without explicit user or orchestrator approval. |
-| `minimal` | Hook-first integrations where `bd prime` carries the detailed workflow | Same git authority as conservative; the installed file stays short and points to `bd prime`. |
-| `team-maintainer` | Repositories that explicitly delegate session close to agents | Agents may close beads, run quality gates, commit, run `bd dolt push`, and `git push` only when repository/user/orchestrator instructions grant that authority. Current "do not commit" or "do not push" instructions override the profile. |
+| `conservative` | Standalone projects, unknown projects, and one-off assistance | Use `bd` for task tracking and keep the detailed workflow in the installed file. |
+| `minimal` | Hook-first integrations where `bd prime` carries the detailed workflow | Keep the installed file short and point to `bd prime`. |
+| `team-maintainer` | Compatibility alias for repositories that previously selected this profile | Use the same Beads task-tracking guidance; source-control decisions stay outside Beads. |
 
-The generated Beads block and `bd prime` default to conservative git authority. Projects that want team-maintainer behavior should say so in their own top-level instructions; Beads does not infer that authority merely because a remote exists.
+Generated Beads guidance never grants or revokes source-control permissions. Those decisions come only from the current user, orchestrator, and repository instructions; Beads configuration and remote detection affect Beads behavior only.
 
 ### Built-in Recipes
 

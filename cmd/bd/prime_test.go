@@ -42,172 +42,34 @@ func stubPrimeStoreUnavailable() func() {
 
 func TestOutputContextFunction(t *testing.T) {
 	defer stubPrimeStoreUnavailable()()
-	tests := []struct {
-		name          string
-		mcpMode       bool
-		stealthMode   bool
-		ephemeralMode bool
-		localOnlyMode bool
-		noPushMode    bool
-		expectText    []string
-		rejectText    []string
-	}{
-		{
-			name:          "CLI Normal (non-ephemeral)",
-			mcpMode:       false,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: false,
-			expectText:    []string{"Beads Workflow Context", "bd dolt push", "Team-maintainer behavior is opt-in", "conservative by default"},
-			rejectText:    []string{"bd export", "--from-main"},
-		},
-		{
-			name:          "CLI Normal (ephemeral)",
-			mcpMode:       false,
-			stealthMode:   false,
-			ephemeralMode: true,
-			localOnlyMode: false,
-			expectText:    []string{"Beads Workflow Context", "bd dolt pull", "ephemeral branch"},
-			rejectText:    []string{"bd export", "git push", "--from-main"},
-		},
-		{
-			name:          "CLI no-push",
-			mcpMode:       false,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: false,
-			noPushMode:    true,
-			expectText:    []string{"Beads Workflow Context", "push disabled", "report handoff"},
-			rejectText:    []string{"bd export", "--from-main"},
-		},
-		{
-			name:          "CLI Stealth",
-			mcpMode:       false,
-			stealthMode:   true,
-			ephemeralMode: false, // stealth mode overrides ephemeral detection
-			localOnlyMode: false,
-			expectText:    []string{"Beads Workflow Context", "bd close"},
-			rejectText:    []string{"git push", "git pull", "git commit", "git status", "git add", "bd export"},
-		},
-		{
-			name:          "CLI Local-only (no git remote)",
-			mcpMode:       false,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: true,
-			expectText:    []string{"Beads Workflow Context", "bd close", "No git remote configured"},
-			rejectText:    []string{"git push", "git pull", "--from-main", "bd export"},
-		},
-		{
-			name:          "CLI Local-only overrides ephemeral",
-			mcpMode:       false,
-			stealthMode:   false,
-			ephemeralMode: true, // ephemeral is true but local-only takes precedence
-			localOnlyMode: true,
-			expectText:    []string{"Beads Workflow Context", "bd close", "No git remote configured"},
-			rejectText:    []string{"git push", "--from-main", "ephemeral branch", "bd export"},
-		},
-		{
-			name:          "CLI Stealth overrides local-only",
-			mcpMode:       false,
-			stealthMode:   true,
-			ephemeralMode: false,
-			localOnlyMode: true, // local-only is true but stealth takes precedence
-			expectText:    []string{"Beads Workflow Context", "bd close"},
-			rejectText:    []string{"git push", "git pull", "git commit", "git status", "git add", "No git remote configured", "bd export"},
-		},
-		{
-			name:          "MCP Normal (non-ephemeral)",
-			mcpMode:       true,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: false,
-			expectText:    []string{"Beads Issue Tracker Active", "Team-maintainer behavior is opt-in"},
-			rejectText:    []string{"bd export", "--from-main"},
-		},
-		{
-			name:          "MCP Normal (ephemeral)",
-			mcpMode:       true,
-			stealthMode:   false,
-			ephemeralMode: true,
-			localOnlyMode: false,
-			expectText:    []string{"Beads Issue Tracker Active", "ephemeral branch"},
-			rejectText:    []string{"bd export", "git push", "--from-main"},
-		},
-		{
-			name:          "MCP no-push",
-			mcpMode:       true,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: false,
-			noPushMode:    true,
-			expectText:    []string{"Beads Issue Tracker Active", "push disabled"},
-			rejectText:    []string{"bd export", "--from-main"},
-		},
-		{
-			name:          "MCP Stealth",
-			mcpMode:       true,
-			stealthMode:   true,
-			ephemeralMode: false, // stealth mode overrides ephemeral detection
-			localOnlyMode: false,
-			expectText:    []string{"Beads Issue Tracker Active", "bd close"},
-			rejectText:    []string{"git push", "git pull", "git commit", "git status", "git add", "bd export"},
-		},
-		{
-			name:          "MCP Local-only (no git remote)",
-			mcpMode:       true,
-			stealthMode:   false,
-			ephemeralMode: false,
-			localOnlyMode: true,
-			expectText:    []string{"Beads Issue Tracker Active", "bd close"},
-			rejectText:    []string{"git push", "git pull", "--from-main", "bd export"},
-		},
-		{
-			name:          "MCP Local-only overrides ephemeral",
-			mcpMode:       true,
-			stealthMode:   false,
-			ephemeralMode: true, // ephemeral is true but local-only takes precedence
-			localOnlyMode: true,
-			expectText:    []string{"Beads Issue Tracker Active", "bd close"},
-			rejectText:    []string{"git push", "--from-main", "ephemeral branch", "bd export"},
-		},
-		{
-			name:          "MCP Stealth overrides local-only",
-			mcpMode:       true,
-			stealthMode:   true,
-			ephemeralMode: false,
-			localOnlyMode: true, // local-only is true but stealth takes precedence
-			expectText:    []string{"Beads Issue Tracker Active", "bd close"},
-			rejectText:    []string{"git push", "git pull", "git commit", "git status", "git add", "bd export"},
-		},
-	}
+	for _, mcpMode := range []bool{false, true} {
+		for _, stealthMode := range []bool{false, true} {
+			for _, ephemeralMode := range []bool{false, true} {
+				for _, hasRemote := range []bool{false, true} {
+					for _, noPush := range []bool{false, true} {
+						defer stubIsEphemeralBranch(ephemeralMode)()
+						defer stubPrimeHasGitRemote(hasRemote)()
+						defer stubPrimeNoPushConfigured(noPush)()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer stubIsEphemeralBranch(tt.ephemeralMode)()
-			defer stubPrimeHasGitRemote(!tt.localOnlyMode)() // localOnly = !primeHasGitRemote
-			defer stubPrimeNoPushConfigured(tt.noPushMode)()
-
-			var buf bytes.Buffer
-			err := outputPrimeContext(&buf, tt.mcpMode, tt.stealthMode)
-			if err != nil {
-				t.Fatalf("outputPrimeContext failed: %v", err)
-			}
-
-			output := buf.String()
-
-			for _, expected := range tt.expectText {
-				if !strings.Contains(output, expected) {
-					t.Errorf("Expected text not found: %s", expected)
+						var buf bytes.Buffer
+						if err := outputPrimeContext(&buf, mcpMode, stealthMode); err != nil {
+							t.Fatalf("outputPrimeContext failed: %v", err)
+						}
+						output := buf.String()
+						wantHeading := "Beads Workflow Context"
+						if mcpMode {
+							wantHeading = "Beads Issue Tracker Active"
+						}
+						for _, expected := range []string{wantHeading, "bd close", "Beads does not grant or revoke"} {
+							if !strings.Contains(output, expected) {
+								t.Errorf("expected text not found: %s", expected)
+							}
+						}
+						assertNoGeneratedGitAuthority(t, output)
+					}
 				}
 			}
-
-			for _, rejected := range tt.rejectText {
-				if strings.Contains(output, rejected) {
-					t.Errorf("Unexpected text found: %s", rejected)
-				}
-			}
-		})
+		}
 	}
 }
 
