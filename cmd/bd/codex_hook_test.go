@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,7 @@ import (
 func stubCodexHookPrime(t *testing.T, fn func(memoriesOnly bool) (string, error)) {
 	t.Helper()
 	orig := codexHookExecPrime
-	codexHookExecPrime = func(_ context.Context, memoriesOnly bool) (string, error) {
+	codexHookExecPrime = func(_ context.Context, _ string, memoriesOnly bool) (string, error) {
 		return fn(memoriesOnly)
 	}
 	t.Cleanup(func() { codexHookExecPrime = orig })
@@ -43,6 +44,102 @@ func TestCodexHookSessionStartInjectsPrimeContext(t *testing.T) {
 	}
 	if !strings.Contains(got.HookSpecificOutput.AdditionalContext, "bd ready --json") {
 		t.Fatalf("expected prime output in additionalContext: %#v", got)
+	}
+}
+
+func TestCodexHookPrimeSubprocessUsesPayloadCWD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	targetDir := t.TempDir()
+	var err error
+	targetDir, err = filepath.EvalSymlinks(targetDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks target: %v", err)
+	}
+	fakeBD := filepath.Join(t.TempDir(), "bd")
+	if err := os.WriteFile(fakeBD, []byte("#!/bin/sh\npwd\n"), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	originalArg0 := os.Args[0]
+	os.Args[0] = fakeBD
+	t.Cleanup(func() { os.Args[0] = originalArg0 })
+
+	input, _ := json.Marshal(codexHookInput{
+		SessionID:     "cwd-session",
+		CWD:           targetDir,
+		HookEventName: codexHookSessionStart,
+	})
+	var out bytes.Buffer
+	if err := runCodexHook(context.Background(), codexHookSessionStart, bytes.NewReader(input), &out); err != nil {
+		t.Fatalf("runCodexHook: %v", err)
+	}
+
+	var got codexHookResponse
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("parse hook output: %v\n%s", err, out.String())
+	}
+	want := targetDir
+	if actual := strings.TrimSpace(got.HookSpecificOutput.AdditionalContext); actual != want {
+		t.Fatalf("prime subprocess cwd = %q, want payload cwd %q", actual, want)
+	}
+}
+
+func TestCodexHookPostCompactRefreshUsesCurrentPayloadCWDOnce(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	codexHookMarkerDirOverride = t.TempDir()
+	t.Cleanup(func() { codexHookMarkerDirOverride = "" })
+
+	beforeDir := t.TempDir()
+	currentDir := t.TempDir()
+	var err error
+	beforeDir, err = filepath.EvalSymlinks(beforeDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks before dir: %v", err)
+	}
+	currentDir, err = filepath.EvalSymlinks(currentDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks current dir: %v", err)
+	}
+	fakeBD := filepath.Join(t.TempDir(), "bd")
+	if err := os.WriteFile(fakeBD, []byte("#!/bin/sh\npwd\n"), 0o755); err != nil {
+		t.Fatalf("write fake bd: %v", err)
+	}
+	originalArg0 := os.Args[0]
+	os.Args[0] = fakeBD
+	t.Cleanup(func() { os.Args[0] = originalArg0 })
+
+	postInput, _ := json.Marshal(codexHookInput{
+		SessionID:     "moving-session",
+		CWD:           beforeDir,
+		HookEventName: codexHookPostCompact,
+	})
+	if err := runCodexHook(context.Background(), codexHookPostCompact, bytes.NewReader(postInput), ioDiscard{}); err != nil {
+		t.Fatalf("PostCompact: %v", err)
+	}
+
+	promptInput, _ := json.Marshal(codexHookInput{
+		SessionID:     "moving-session",
+		CWD:           currentDir,
+		HookEventName: codexHookUserPromptSubmit,
+	})
+	var out bytes.Buffer
+	if err := runCodexHook(context.Background(), codexHookUserPromptSubmit, bytes.NewReader(promptInput), &out); err != nil {
+		t.Fatalf("UserPromptSubmit: %v", err)
+	}
+	want := currentDir
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("refresh did not use current payload cwd %q: %s", want, out.String())
+	}
+
+	out.Reset()
+	if err := runCodexHook(context.Background(), codexHookUserPromptSubmit, bytes.NewReader(promptInput), &out); err != nil {
+		t.Fatalf("second UserPromptSubmit: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("refresh repeated after marker was consumed: %s", out.String())
 	}
 }
 

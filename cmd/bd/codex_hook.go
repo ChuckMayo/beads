@@ -25,12 +25,15 @@ const (
 
 var codexHookMarkerDirOverride string
 
-var codexHookExecPrime = func(ctx context.Context, memoriesOnly bool) (string, error) {
+var codexHookExecPrime = func(ctx context.Context, cwd string, memoriesOnly bool) (string, error) {
 	args := []string{"prime"}
 	if memoriesOnly {
 		args = append(args, "--memories-only")
 	}
 	cmd := exec.CommandContext(ctx, os.Args[0], args...)
+	if strings.TrimSpace(cwd) != "" {
+		cmd.Dir = cwd
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("bd %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -86,9 +89,9 @@ func runCodexHook(ctx context.Context, event string, stdin io.Reader, stdout io.
 
 	switch event {
 	case codexHookSessionStart:
-		return codexHookInjectPrime(ctx, stdout, codexHookSessionStart)
+		return codexHookInjectPrime(ctx, input.CWD, stdout, codexHookSessionStart)
 	case codexHookPreCompact:
-		return codexHookPreCompactCheck(ctx, stdout)
+		return codexHookPreCompactCheck(ctx, input.CWD, stdout)
 	case codexHookPostCompact:
 		return codexHookMarkNeedsRefresh(input)
 	case codexHookUserPromptSubmit:
@@ -98,16 +101,16 @@ func runCodexHook(ctx context.Context, event string, stdin io.Reader, stdout io.
 	}
 }
 
-func codexHookInjectPrime(ctx context.Context, stdout io.Writer, event string) error {
-	out, err := codexHookExecPrime(ctx, false)
+func codexHookInjectPrime(ctx context.Context, cwd string, stdout io.Writer, event string) error {
+	out, err := codexHookExecPrime(ctx, cwd, false)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return nil
 	}
 	return writeCodexHookAdditionalContext(stdout, event, out)
 }
 
-func codexHookPreCompactCheck(ctx context.Context, stdout io.Writer) error {
-	if _, err := codexHookExecPrime(ctx, true); err != nil {
+func codexHookPreCompactCheck(ctx context.Context, cwd string, stdout io.Writer) error {
+	if _, err := codexHookExecPrime(ctx, cwd, true); err != nil {
 		return writeCodexHookSystemMessage(stdout, fmt.Sprintf("Beads context check failed before compaction: %v", err))
 	}
 	return nil
@@ -126,7 +129,7 @@ func codexHookMaybeRefresh(ctx context.Context, input codexHookInput, stdout io.
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
-	out, err := codexHookExecPrime(ctx, false)
+	out, err := codexHookExecPrime(ctx, input.CWD, false)
 	if err != nil {
 		return writeCodexHookSystemMessage(stdout, fmt.Sprintf("Beads context refresh after compaction failed: %v", err))
 	}
@@ -139,15 +142,14 @@ func codexHookMaybeRefresh(ctx context.Context, input codexHookInput, stdout io.
 
 func codexHookRefreshMarkerPath(input codexHookInput) string {
 	base := codexHookMarkerBaseDir()
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = "unknown-session"
+	sessionKey := input.SessionID
+	if sessionKey == "" {
+		sessionKey = input.TranscriptPath
 	}
-	workspace := input.CWD
-	if workspace == "" {
-		workspace = "unknown-workspace"
+	if sessionKey == "" {
+		sessionKey = "unknown-session"
 	}
-	sum := sha256.Sum256([]byte(sessionID + "\x00" + filepath.Clean(workspace)))
+	sum := sha256.Sum256([]byte(sessionKey + "\x00codex-session"))
 	return filepath.Join(base, hex.EncodeToString(sum[:])+".refresh")
 }
 

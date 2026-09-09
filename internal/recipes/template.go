@@ -13,9 +13,8 @@ This project uses [Beads (bd)](https://github.com/gastownhall/beads) for issue t
 - Track ALL work in bd (never use markdown TODOs or comment-based task lists)
 - Use ` + "`bd ready`" + ` to find available work
 - Use ` + "`bd create`" + ` to track new issues/tasks/bugs
-- Treat commit, push, and Dolt remote sync as policy-controlled handoff actions
+- Follow current user, orchestrator, and repository instructions for source control; Beads does not grant or revoke those permissions
 - Run ` + "`bd prime`" + ` for complete workflow context (SSOT for operational commands)
-- Default to conservative git authority: report status and proposed commands unless the user, orchestrator, or repository profile explicitly authorizes commit/sync/push
 
 ## Quick Reference
 
@@ -27,7 +26,7 @@ bd create "title" -t task -p 2        # Create new issue
 bd update <id> --claim                # Claim work atomically
 bd close <id>                         # Mark complete
 bd dep add <issue> <depends-on>       # Add dependency
-bd dolt push                          # Sync with remote when authorized
+bd dolt push                          # Sync Beads issue data with its remote
 ` + "```" + `
 
 ## Workflow
@@ -36,7 +35,7 @@ bd dolt push                          # Sync with remote when authorized
 2. Claim an issue atomically: ` + "`bd update <id> --claim`" + `
 3. Do the work
 4. Mark complete: ` + "`bd close <id>`" + `
-5. Handoff: report changed files, validation, issue status, and any proposed commit/sync/push commands
+5. Handoff: report issue status, validation, and any blocked Beads sync
 
 ## Issue Types
 
@@ -74,8 +73,7 @@ This repository uses **Beads (bd)** for issue tracking.
 - Use ` + "`bd create`" + ` to track new work
 - Use ` + "`bd update <id> --claim`" + ` before starting
 - Use ` + "`bd close <id>`" + ` when work is complete
-- Treat commit, push, and Dolt remote sync as policy-controlled handoff actions
-- Do not commit, push, or run Dolt remote sync unless explicitly authorized
+- Follow current user, orchestrator, and repository instructions for source control; Beads does not grant or revoke those permissions
 
 ## Context Loading
 

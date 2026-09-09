@@ -20,9 +20,9 @@ Designed for Claude Code, Gemini CLI, and Codex SessionStart hooks to prevent
 agents from forgetting bd workflow after context compaction.
 
 Config options:
-- no-git-ops: When true, outputs stealth mode (no git commands in session close protocol).
+- no-git-ops: Legacy compatibility key retained for existing stealth setups.
+  Prime ignores it and never derives source-control permissions from Beads state.
   Set via: bd config set no-git-ops true
-  Useful when you want to control when commits happen manually.
 
 	Workflow customization:
 	- Place a .beads/PRIME.md file in the local clone or resolved workspace to override the default output entirely.
@@ -41,5 +41,5 @@ bd prime [flags]
       --hook-json       Wrap output in the SessionStart hook JSON envelope (Claude Code, Gemini CLI, Codex)
       --mcp             Force MCP mode (minimal output)
       --memories-only   Output only persistent memories for compact hook contexts
-      --stealth         Stealth mode (no git operations, flush only)
+      --stealth         Legacy compatibility flag; prime stays source-control neutral
 ```

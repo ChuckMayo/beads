@@ -26,6 +26,10 @@ env:
 jobs:
   migration-test:
     name: Migration fidelity
+    # ChuckMayo fork tags have a dedicated schema-stable release gate. Keep
+    # this upstream historical-migration matrix available for manual runs,
+    # but do not attach its upstream-release assumptions to fork releases.
+    if: github.event_name != 'push' || !contains(github.ref_name, '-chuck.')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

@@ -34,7 +34,7 @@ var YamlOnlyKeys = map[string]bool{
 	"git.author":      true,
 	"git.no-gpg-sign": true,
 	"no-push":         true,
-	"no-git-ops":      true, // Disable git ops in bd prime session close protocol (GH#593)
+	"no-git-ops":      true, // Disable Beads-managed Git side effects; never a source-control permission (GH#593)
 
 	// Sync settings
 	"sync.remote":     true, // Primary: any Dolt-compatible remote URL

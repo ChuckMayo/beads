@@ -1,12 +1,14 @@
 # bd - Beads
 
+**beads without the bullshit**
+
 **Distributed graph issue tracker for AI agents, powered by [Dolt](https://github.com/dolthub/dolt).**
 
 **Platforms:** macOS, Linux, Windows, FreeBSD
 
 [![License](https://img.shields.io/github/license/gastownhall/beads)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/steveyegge/beads)](https://goreportcard.com/report/github.com/steveyegge/beads)
-[![Release](https://img.shields.io/github/v/release/gastownhall/beads)](https://github.com/gastownhall/beads/releases)
+[![Fork Release](https://img.shields.io/github/v/release/ChuckMayo/beads?include_prereleases)](https://github.com/ChuckMayo/beads/releases)
 [![npm version](https://img.shields.io/npm/v/@beads/bd)](https://www.npmjs.com/package/@beads/bd)
 [![PyPI](https://img.shields.io/pypi/v/beads-mcp)](https://pypi.org/project/beads-mcp/)
 
@@ -17,8 +19,8 @@ Beads provides a persistent, structured memory for coding agents. It replaces me
 ## ⚡ Quick Start
 
 ```bash
-# Install beads CLI (system-wide - don't clone this repo into your project)
-curl -fsSL https://raw.githubusercontent.com/gastownhall/beads/main/scripts/install.sh | bash
+# Install this pinned fork (system-wide - don't clone it into your project)
+curl -fsSL https://raw.githubusercontent.com/ChuckMayo/beads/v1.2.2-chuck.1/scripts/install-chuck-fork.sh | bash
 
 # Initialize in YOUR project
 cd your-project
@@ -31,6 +33,8 @@ bd setup factory  # Factory.ai Droid - creates/updates AGENTS.md
 ```
 
 **Note:** Beads is a CLI tool you install once and use everywhere. You don't need to clone this repository into your project.
+
+Fork release and update details: [docs/FORK_DISTRIBUTION.md](docs/FORK_DISTRIBUTION.md).
 
 `bd init` creates or updates `AGENTS.md` by default so agents can discover the beads workflow, and also installs project Claude/Codex integrations unless you pass `--skip-agents` or `--stealth`. Use `bd setup --list` to see supported integrations, including `bd setup codex`, `bd setup factory`, `bd setup claude`, `bd setup mux`, `bd setup cursor`, and more. See [Agent and IDE setup](docs/SETUP.md).
 
@@ -202,7 +206,8 @@ bd close bd-a1b2 "Fixed"
 
 `BEADS_DIR` tells bd where to put the `.beads/` database directory,
 bypassing git repo discovery. `--stealth` sets `no-git-ops: true` in
-config, disabling all git hook installation and git operations.
+config, disabling Beads' own hook installation and automated Git side effects.
+It never changes whether a user or agent may run source-control commands.
 
 This is useful for:
 - **Non-git VCS** (Sapling, Jujutsu, Piper) — no `.git/` directory needed

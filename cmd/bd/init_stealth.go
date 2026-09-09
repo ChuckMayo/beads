@@ -224,8 +224,8 @@ func removeBeadsProjectGitignoreSection(repoPath string) (bool, error) {
 }
 
 // isStealthRepo reports whether beads must keep its footprint out of tracked git files for the
-// workspace at repoPath. It keys off the persisted no-git-ops flag — the same signal bd prime uses
-// for the stealth session-close protocol (GH#593). bd init --stealth sets it, and a user may also
+// workspace at repoPath. It keys off the persisted no-git-ops flag, which controls only Beads'
+// own Git side effects (GH#593). bd init --stealth sets it, and a user may also
 // set it directly; either way beads routes ignores into .git/info/exclude rather than a tracked
 // .gitignore.
 func isStealthRepo(repoPath string) bool {

@@ -19,7 +19,7 @@ func TestEmbeddedDefault(t *testing.T) {
 		"BEGIN BEADS INTEGRATION",
 		"END BEADS INTEGRATION",
 		"## Session Completion",
-		"git push",
+		"Beads does not grant or revoke",
 	}
 	for _, want := range required {
 		if !strings.Contains(content, want) {

@@ -30,7 +30,7 @@ The plugin and `bd setup codex` fallback install the same lifecycle:
 
 `PreCompact` cannot preserve Beads context by printing text; compact hook plain stdout is ignored by Codex. Beads therefore uses `PostCompact` plus the next `UserPromptSubmit` to recover context after successful manual or automatic compaction.
 
-Refresh markers are stored in a user cache/temp directory keyed by Codex `session_id` and workspace path. They are not written to tracked files or to the Beads database.
+Refresh markers are stored in a user cache/temp directory keyed by the Codex `session_id` (or transcript path when the session ID is unavailable). The key is deliberately independent of workspace path so a refresh survives a working-directory change. Markers are not written to tracked files or to the Beads database.
 
 ## Manual Fallback
 
