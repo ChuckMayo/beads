@@ -955,8 +955,19 @@ func isNonInteractiveBootstrap(flagValue bool) bool {
 // findParentConfig walks up from beadsDir's parent looking for a
 // .beads/metadata.json in ancestor directories. This handles the case where a
 // rig subdirectory (its own git repo) doesn't have a local .beads but its
-// parent workspace does. Returns nil if no parent config is found.
+// parent workspace does. Returns nil if beadsDir already exists on disk, or if
+// no parent config is found.
 func findParentConfig(beadsDir string) *configfile.Config {
+	// Only search upward when beadsDir was synthesized, i.e. the project has no
+	// .beads of its own (fresh clone, or a rig nested under a workspace). A
+	// project that owns a real .beads directory but happens to lack
+	// metadata.json owns its workspace too, and must not silently adopt an
+	// unrelated parent's database — including ~/.beads, which the walk below
+	// treats as a candidate.
+	if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {
+		return nil
+	}
+
 	// Start from the parent of beadsDir's enclosing directory.
 	// beadsDir is typically "<project>/.beads", so we start from <project>'s parent.
 	start := filepath.Dir(filepath.Dir(beadsDir))

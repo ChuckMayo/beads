@@ -943,6 +943,55 @@ func TestBootstrapRigSubdirUsesParentDBName(t *testing.T) {
 // BEADS_DOLT_SHARED_SERVER=1 is set but cfg.DoltMode is the default (embedded),
 // detectBootstrapAction looks in the shared-server directory — not embeddeddolt/.
 // This is the root cause of GH#30.
+// TestFindParentConfigIgnoresRealBeadsDir verifies that a project with its own
+// real .beads directory does NOT inherit a parent workspace's dolt_database
+// just because it lacks metadata.json.
+//
+// The parent search exists for GH#3029, where beadsDir is *synthesized* for a
+// fresh clone or rig that has no .beads at all. A checkout that has a real
+// .beads (config.yaml, an embeddeddolt directory, backups) but no
+// metadata.json is a different situation: it owns its workspace, and walking
+// up silently binds it to an unrelated database. Observed against a repo one
+// level below $HOME, which adopted ~/.beads/metadata.json and planned to clone
+// into that database while `bd ready` still read the default "beads".
+func TestFindParentConfigIgnoresRealBeadsDir(t *testing.T) {
+	t.Setenv("BEADS_DOLT_DATA_DIR", "")
+	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "")
+
+	workspace := t.TempDir()
+	parentBeads := filepath.Join(workspace, ".beads")
+	if err := os.MkdirAll(parentBeads, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	metadataJSON := `{"dolt_mode": "embedded", "dolt_database": "parent_db"}`
+	if err := os.WriteFile(filepath.Join(parentBeads, "metadata.json"), []byte(metadataJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The project owns a real .beads: config.yaml present, metadata.json absent.
+	projectBeads := filepath.Join(workspace, "project", ".beads")
+	if err := os.MkdirAll(projectBeads, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectBeads, "config.yaml"), []byte("issue-prefix: \"proj\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg := findParentConfig(projectBeads); cfg != nil {
+		t.Fatalf("findParentConfig() = %q for a project with its own .beads; want nil", cfg.GetDoltDatabase())
+	}
+
+	// A synthesized dir (no .beads on disk) must still find the parent: GH#3029.
+	synthesized := filepath.Join(workspace, "rig", ".beads")
+	cfg := findParentConfig(synthesized)
+	if cfg == nil {
+		t.Fatal("findParentConfig() = nil for a synthesized beadsDir; want the parent workspace config")
+	}
+	if got := cfg.GetDoltDatabase(); got != "parent_db" {
+		t.Fatalf("GetDoltDatabase() = %q, want %q", got, "parent_db")
+	}
+}
+
 func TestDetectBootstrapAction_SharedServerEnvUsesSharedPath(t *testing.T) {
 	t.Setenv("BEADS_DOLT_DATA_DIR", "")
 	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "")
